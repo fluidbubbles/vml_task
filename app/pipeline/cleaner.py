@@ -54,9 +54,15 @@ def _clean_single(raw: RawProduct) -> Product | None:
 def _parse_price(raw: str | None) -> float | None:
     if not raw:
         return None
-    cleaned = raw.replace("$", "").replace(",", "").strip()
+    # Strip currency symbols/words (USD, EUR, $, etc.)
+    cleaned = re.sub(r"[^\d.,\-]", "", raw).strip()
     if "-" in cleaned:
         cleaned = cleaned.split("-")[0].strip()
+    # Handle European comma-as-decimal format
+    if "," in cleaned and "." in cleaned:
+        cleaned = cleaned.replace(",", "")
+    elif "," in cleaned and "." not in cleaned:
+        cleaned = cleaned.replace(",", ".")
     try:
         val = float(cleaned)
         return val if val > 0 else None
@@ -77,7 +83,15 @@ def _parse_rating(raw: str | None) -> float | None:
 def _parse_reviews(raw: str | None) -> int | None:
     if not raw:
         return None
-    cleaned = raw.replace(",", "").strip()
+    # Strip parens: "(264)" -> "264"
+    cleaned = raw.replace("(", "").replace(")", "").replace(",", "").strip()
+    # Handle K suffix: "12.5K" -> 12500
+    if cleaned.upper().endswith("K"):
+        try:
+            val = float(cleaned[:-1]) * 1000
+            return int(val) if val > 0 else None
+        except ValueError:
+            return None
     try:
         val = int(cleaned)
         return val if val > 0 else None

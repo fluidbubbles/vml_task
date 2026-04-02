@@ -11,3 +11,5 @@ celery_app.conf.update(
     accept_content=["json"],
     task_track_started=True,
 )
+
+celery_app.autodiscover_tasks(["app.worker"])
