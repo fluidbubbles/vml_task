@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Product Intelligence</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                   Helvetica, Arial, sans-serif, "Apple Color Emoji";
+      background: #f5f5f5;
+      color: #222;
+      padding: 24px 16px 48px;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 28px;
+    }
+
+    #scrapeBtn {
+      padding: 8px 18px;
+      background: #1976d2;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    #scrapeBtn:hover:not(:disabled) { background: #1256a0; }
+    #scrapeBtn:disabled { background: #90bce8; cursor: not-allowed; }
+
+    #keywordFilter {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    #status {
+      font-size: 0.88rem;
+      color: #555;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 20px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 18px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.10), 0 2px 8px rgba(0,0,0,0.06);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      position: relative;
+      border: 2px solid transparent;
+      transition: box-shadow 0.15s;
+    }
+    .card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.14); }
+
+    .card.top-product {
+      border-color: #ffc107;
+      background: #fffde7;
+    }
+
+    .rank-badge {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      background: #ffc107;
+      color: #333;
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 3px 9px;
+      border-radius: 12px;
+    }
+
+    .card-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      line-height: 1.35;
+      padding-right: 56px; /* avoid overlap with badge */
+    }
+
+    .card-meta {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      font-size: 0.85rem;
+      color: #444;
+    }
+
+    .meta-item { display: flex; flex-direction: column; gap: 1px; }
+    .meta-label { font-size: 0.72rem; color: #888; text-transform: uppercase; letter-spacing: 0.04em; }
+    .meta-value { font-weight: 600; }
+
+    .price { color: #1a7a1a; font-size: 1.05rem; }
+    .score { color: #b06000; }
+
+    .keyword-tag {
+      display: inline-block;
+      font-size: 0.75rem;
+      background: #e3f2fd;
+      color: #1565c0;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-weight: 500;
+      align-self: flex-start;
+    }
+
+    .bullets {
+      font-size: 0.82rem;
+      color: #444;
+      padding-left: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .bullets li { line-height: 1.4; }
+
+    .no-products {
+      grid-column: 1 / -1;
+      text-align: center;
+      color: #888;
+      font-size: 1rem;
+      padding: 48px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>Product Intelligence</h1>
+  <div class="controls">
+    <button id="scrapeBtn">Scrape Amazon</button>
+    <select id="keywordFilter"><option value="">All Keywords</option></select>
+    <span id="status"></span>
+  </div>
+  <div class="grid" id="productGrid"></div>
+
+  <script>
+    'use strict';
+
+    const scrapeBtn = document.getElementById('scrapeBtn');
+    const keywordFilter = document.getElementById('keywordFilter');
+    const statusEl = document.getElementById('status');
+    const productGrid = document.getElementById('productGrid');
+
+    // ── Utilities ──────────────────────────────────────────────────────────────
+
+    function setStatus(msg) {
+      statusEl.textContent = msg;
+    }
+
+    function formatPrice(price) {
+      if (price == null) return 'N/A';
+      return '$' + Number(price).toFixed(2);
+    }
+
+    function formatRating(rating) {
+      if (rating == null) return 'N/A';
+      return Number(rating).toFixed(1) + ' / 5';
+    }
+
+    function formatScore(score) {
+      if (score == null) return 'N/A';
+      return Number(score).toFixed(2);
+    }
+
+    // ── Render ─────────────────────────────────────────────────────────────────
+
+    function renderProducts(products, topMap) {
+      productGrid.replaceChildren();
+
+      if (!products.length) {
+        const msg = document.createElement('p');
+        msg.className = 'no-products';
+        msg.textContent = 'No products found. Try scraping first.';
+        productGrid.appendChild(msg);
+        return;
+      }
+
+      for (const product of products) {
+        const rank = topMap.get(product.url);
+        const isTop = rank != null;
+
+        // Card wrapper
+        const card = document.createElement('div');
+        card.className = isTop ? 'card top-product' : 'card';
+
+        // Rank badge
+        if (isTop) {
+          const badge = document.createElement('span');
+          badge.className = 'rank-badge';
+          badge.textContent = '#' + rank;
+          card.appendChild(badge);
+        }
+
+        // Title
+        const title = document.createElement('div');
+        title.className = 'card-title';
+        title.textContent = product.title || 'Untitled';
+        card.appendChild(title);
+
+        // Keyword tag
+        if (product.keyword) {
+          const kw = document.createElement('span');
+          kw.className = 'keyword-tag';
+          kw.textContent = product.keyword;
+          card.appendChild(kw);
+        }
+
+        // Meta row
+        const meta = document.createElement('div');
+        meta.className = 'card-meta';
+
+        const metaFields = [
+          { label: 'Price',   value: formatPrice(product.price),          extra: 'price'  },
+          { label: 'Rating',  value: formatRating(product.rating),        extra: null     },
+          { label: 'Reviews', value: product.num_reviews != null
+                                       ? product.num_reviews.toLocaleString()
+                                       : 'N/A',                           extra: null     },
+          { label: 'Score',   value: formatScore(product.score),          extra: 'score'  },
+        ];
+
+        for (const field of metaFields) {
+          const item = document.createElement('div');
+          item.className = 'meta-item';
+
+          const lbl = document.createElement('span');
+          lbl.className = 'meta-label';
+          lbl.textContent = field.label;
+
+          const val = document.createElement('span');
+          val.className = field.extra ? 'meta-value ' + field.extra : 'meta-value';
+          val.textContent = field.value;
+
+          item.appendChild(lbl);
+          item.appendChild(val);
+          meta.appendChild(item);
+        }
+
+        card.appendChild(meta);
+
+        // Bullet points (first 3)
+        const bullets = Array.isArray(product.bullet_points)
+          ? product.bullet_points.slice(0, 3)
+          : [];
+
+        if (bullets.length) {
+          const ul = document.createElement('ul');
+          ul.className = 'bullets';
+          for (const point of bullets) {
+            const li = document.createElement('li');
+            li.textContent = point;
+            ul.appendChild(li);
+          }
+          card.appendChild(ul);
+        }
+
+        productGrid.appendChild(card);
+      }
+    }
+
+    // ── Filter ─────────────────────────────────────────────────────────────────
+
+    function populateFilter(products) {
+      const current = keywordFilter.value;
+
+      // Keep the "All Keywords" option, remove the rest
+      while (keywordFilter.options.length > 1) {
+        keywordFilter.remove(1);
+      }
+
+      const keywords = [...new Set(
+        products.map(p => p.keyword).filter(k => k != null && k !== '')
+      )].sort();
+
+      for (const kw of keywords) {
+        const opt = document.createElement('option');
+        opt.value = kw;
+        opt.textContent = kw;
+        keywordFilter.appendChild(opt);
+      }
+
+      // Restore selection if still valid
+      if ([...keywordFilter.options].some(o => o.value === current)) {
+        keywordFilter.value = current;
+      }
+    }
+
+    // ── Data loading ───────────────────────────────────────────────────────────
+
+    async function loadProducts() {
+      setStatus('Loading...');
+      try {
+        const keyword = keywordFilter.value;
+        const productsUrl = keyword
+          ? '/products?keyword=' + encodeURIComponent(keyword)
+          : '/products';
+
+        const [productsRes, topRes] = await Promise.all([
+          fetch(productsUrl),
+          fetch('/top-products'),
+        ]);
+
+        if (!productsRes.ok) throw new Error('Failed to fetch products');
+        if (!topRes.ok)      throw new Error('Failed to fetch top products');
+
+        const products    = await productsRes.json();
+        const topProducts = await topRes.json();
+
+        // Build url → rank map from top products
+        const topMap = new Map();
+        for (const tp of topProducts) {
+          if (tp.url != null && tp.rank != null) {
+            topMap.set(tp.url, tp.rank);
+          }
+        }
+
+        populateFilter(products);
+        renderProducts(products, topMap);
+        setStatus('');
+      } catch (err) {
+        setStatus('Error: ' + err.message);
+      }
+    }
+
+    // ── Scrape ─────────────────────────────────────────────────────────────────
+
+    async function triggerScrape() {
+      scrapeBtn.disabled = true;
+      setStatus('Scraping in progress...');
+      try {
+        const res = await fetch('/scrape', { method: 'POST' });
+        if (!res.ok) throw new Error('Scrape request failed (' + res.status + ')');
+        setStatus('Scraping started. Reloading results in 30s...');
+        setTimeout(() => {
+          loadProducts();
+          scrapeBtn.disabled = false;
+        }, 30000);
+      } catch (err) {
+        setStatus('Error: ' + err.message);
+        scrapeBtn.disabled = false;
+      }
+    }
+
+    // ── Events ─────────────────────────────────────────────────────────────────
+
+    scrapeBtn.addEventListener('click', triggerScrape);
+    keywordFilter.addEventListener('change', loadProducts);
+
+    // ── Init ───────────────────────────────────────────────────────────────────
+
+    loadProducts();
+  </script>
+</body>
+</html>
